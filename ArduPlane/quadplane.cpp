@@ -1037,6 +1037,11 @@ void QuadPlane::set_climb_rate_cms(float target_climb_rate_cms)
     pos_control->input_vel_accel_z(target_climb_rate_cms, 0, false);
 }
 
+void QuadPlane::set_target_alt_cms(float target_alt_cms)
+{
+    pos_control->set_alt_target_with_slew(target_alt_cms);
+}
+
 /*
   hold hover with target climb rate
  */
@@ -1544,6 +1549,8 @@ void SLT_Transition::update()
     if (quadplane.should_assist(aspeed, have_airspeed)) {
         // the quad should provide some assistance to the plane
         quadplane.assisted_flight = true;
+        // gcs().send_text(MAV_SEVERITY_INFO, "Assisted Flight phase");
+
         // update transition state for vehicles using airspeed wait
         if (!in_forced_transition) {
             if (transition_state != TRANSITION_AIRSPEED_WAIT) {
@@ -1633,6 +1640,7 @@ void SLT_Transition::update()
         // transition. We don't limit the climb rate on tilt rotors as
         // otherwise the plane can end up in high-alpha flight with
         // low VTOL thrust and may not complete a transition
+
         float climb_rate_cms = quadplane.assist_climb_rate_cms();
         if (quadplane.option_is_set(QuadPlane::OPTION::LEVEL_TRANSITION) && !quadplane.tiltrotor.enabled()) {
             climb_rate_cms = MIN(climb_rate_cms, 0.0f);
@@ -1662,7 +1670,7 @@ void SLT_Transition::update()
         // multicopter control
         plane.pitchController.reset_I();
         plane.rollController.reset_I();
-
+        
         // give full authority to attitude control
         quadplane.attitude_control->set_throttle_mix_max(1.0f);
         break;
@@ -1728,6 +1736,12 @@ void SLT_Transition::update()
         return;
     }
 
+    quadplane.set_climb_rate_cms(0);
+    // quadplane.set_target_alt_cms(50*100);
+    // quadplane.run_z_controller();
+
+    // gcs().send_text(MAV_SEVERITY_INFO, "Controlling Z");
+    
     quadplane.motors_output();
 
     set_last_fw_pitch();
@@ -3073,7 +3087,10 @@ void QuadPlane::waypoint_controller(void)
                                                        true);
 
     // climb based on altitude error
+    // gcs().send_text(MAV_SEVERITY_INFO, "Overriding height");
+
     set_climb_rate_cms(assist_climb_rate_cms());
+    // set_target_alt_cms(50*100);
     run_z_controller();
 }
 

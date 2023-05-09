@@ -109,7 +109,7 @@ test.ArduCopter/*
 GPATH
 GRTAGS
 GTAGS
-*.apj
+#*.apj
 .gdbinit
 /.vscode
 /.history
