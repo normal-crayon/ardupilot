@@ -1738,7 +1738,7 @@ void SLT_Transition::update()
 
     quadplane.set_climb_rate_cms(0);
     // quadplane.set_target_alt_cms(50*100);
-    // quadplane.run_z_controller();
+    quadplane.run_z_controller();
 
     // gcs().send_text(MAV_SEVERITY_INFO, "Controlling Z");
     
