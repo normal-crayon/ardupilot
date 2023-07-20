@@ -321,6 +321,29 @@ private:
         bool warned;
     } transition_failure;
 
+    // AUTO mode states for elevator engagement 
+    enum AUTO_STATE{
+        NO_ELEV=0,
+        ASCENT,
+        ASCENT_DONE,
+        DESCENT,
+        DESCENT_DONE,
+        CRUISE,
+    };
+
+    class auto_state{
+        public:
+        enum AUTO_STATE state;
+        bool use_elev = false;
+        // get state
+        enum AUTO_STATE get_state() const{
+            return state;
+        }
+
+        // set state 
+        void set_state(enum AUTO_STATE s);
+
+    }autostate;
 
     // Quadplane trim, degrees
     AP_Float ahrs_trim_pitch;

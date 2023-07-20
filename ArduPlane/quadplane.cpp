@@ -1050,8 +1050,18 @@ void QuadPlane::hold_hover(float target_climb_rate_cms)
     // motors use full range
     set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
+    // gcs().send_text(MAV_SEVERITY_DEBUG, "alt offset %.1f", (double)plane.calc_altitude_error_cm());
+
+    // if(plane.current_loc.alt >= plane.next_WP_loc.alt){
+    //     poscontrol.slow_descent = true;
+    //     set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
+    // }
+
     // set vertical speed and acceleration limits
     pos_control->set_max_speed_accel_z(-get_pilot_velocity_z_max_dn(), pilot_velocity_z_max_up, pilot_accel_z);
+
+    // set correction speed and acceleration (how is this different from the above limit?)
+    pos_control->set_correction_speed_accel_z(-get_pilot_velocity_z_max_dn(), pilot_velocity_z_max_up, pilot_accel_z);
 
     // call attitude controller
     multicopter_attitude_rate_update(get_desired_yaw_rate_cds(false));
@@ -1060,6 +1070,7 @@ void QuadPlane::hold_hover(float target_climb_rate_cms)
     set_climb_rate_cms(target_climb_rate_cms);
 
     run_z_controller();
+    
 }
 
 float QuadPlane::get_pilot_throttle()
@@ -1391,7 +1402,7 @@ float QuadPlane::assist_climb_rate_cms(void) const
     climb_rate = constrain_float(climb_rate, -wp_nav->get_default_speed_down(), wp_nav->get_default_speed_up());
 
     // bring in the demanded climb rate over 2 seconds
-    const uint32_t ramp_up_time_ms = 2000;
+    const uint32_t ramp_up_time_ms = 500;
     const uint32_t dt_since_start = last_pidz_active_ms - last_pidz_init_ms;
     if (dt_since_start < ramp_up_time_ms) {
         climb_rate = linear_interpolate(0, climb_rate, dt_since_start, 0, ramp_up_time_ms);
@@ -1399,6 +1410,18 @@ float QuadPlane::assist_climb_rate_cms(void) const
     
     return climb_rate;
 }
+
+/*
+    estimate pitch angles for controlling altitude
+*/
+// float QuadPlane::assist_alt_gain(void) const
+// {
+//     float pitch_need;
+//     if(plane.control_mode->does_auto_throttle()){
+//         pitch_need = 
+//     }
+// }
+
 
 /*
   calculate desired yaw rate for assistance
@@ -1528,6 +1551,33 @@ bool QuadPlane::should_assist(float aspeed, bool have_airspeed)
     return ret;
 }
 
+void QuadPlane::auto_state::set_state(enum AUTO_STATE s){
+
+    // No need to assign states if not in auto mode 
+    if(plane.control_mode != &plane.mode_auto){
+        return;
+    }
+    // if(state != s){
+        if(plane.prev_WP_loc.alt < plane.next_WP_loc.alt){
+            s = AUTO_STATE::ASCENT;
+        }
+        
+        if(plane.prev_WP_loc.alt < plane.next_WP_loc.alt && plane.current_loc.alt >= plane.next_WP_loc.alt){
+            s = AUTO_STATE::ASCENT_DONE;
+        }
+        
+        if(plane.prev_WP_loc.alt == plane.next_WP_loc.alt){
+            s = AUTO_STATE::CRUISE;
+        }
+        
+        if(plane.prev_WP_loc.alt > plane.next_WP_loc.alt){
+            s = AUTO_STATE::DESCENT;
+        }
+    // I see no need for DESCENT DONE condition, but can be used later
+    // }
+    state = s;
+}
+
 /*
   update for transition from quadplane to fixed wing mode
  */
@@ -1538,6 +1588,10 @@ void SLT_Transition::update()
     if (!plane.arming.is_armed_and_safety_off()) {
         // reset the failure timer if we are disarmed
         transition_start_ms = now;
+    }
+
+    if(plane.control_mode != &plane.mode_auto){
+        quadplane.autostate.use_elev = false;
     }
 
     float aspeed;
@@ -1642,6 +1696,65 @@ void SLT_Transition::update()
         // low VTOL thrust and may not complete a transition
 
         float climb_rate_cms = quadplane.assist_climb_rate_cms();
+        // gcs().send_text(MAV_SEVERITY_INFO, "assist climb rate %.1f", (double)climb_rate_cms);
+
+        // cruise condition - engage elevator only here
+        // if(plane.prev_WP_loc.alt < plane.next_WP_loc.alt && plane.current_loc.alt > plane.next_WP_loc.alt){
+
+        //     plane.auto_state.wp_distance = plane.current_loc.get_distance(plane.next_WP_loc);
+        //     plane.auto_state.wp_proportion = plane.current_loc.line_path_proportion(plane.current_loc, plane.next_WP_loc);
+        //     plane.TECS_controller.set_path_proportion(plane.auto_state.wp_proportion);
+        //     // quadplane.autostate.use_elev = true;
+        //     // if(quadplane.autostate.use_elev){
+        //     //     gcs().send_text(MAV_SEVERITY_INFO, "pitch demand %.1f", (double)plane.nav_pitch_cd);
+        //     //     plane.nav_pitch_cd = plane.nav_pitch_cd*10;
+        //     //     // introduce integrator
+        //     //     SRV_Channels::set_output_scaled(SRV_Channel::k_elevator, plane.nav_pitch_cd);
+        //     // }
+        // }
+
+        // Now we use auto states for determining where to use elevator and where not
+        // We only need to use elevator in ASCENT DONE and CRUISE conditions 
+        quadplane.autostate.set_state(quadplane.autostate.state);
+        switch(quadplane.autostate.get_state()){
+            case QuadPlane::AUTO_STATE::ASCENT_DONE:{
+                plane.auto_state.wp_distance = plane.current_loc.get_distance(plane.next_WP_loc);
+                plane.auto_state.wp_proportion = plane.current_loc.line_path_proportion(plane.current_loc, plane.next_WP_loc);
+                plane.TECS_controller.set_path_proportion(plane.auto_state.wp_proportion);
+                plane.set_offset_altitude_location(plane.current_loc, plane.next_WP_loc);
+                plane.calc_throttle();
+                plane.calc_nav_pitch();
+                quadplane.autostate.use_elev = true;
+                break;
+                // gcs().send_text(MAV_SEVERITY_INFO, "nav pitch %.1f", (double)plane.nav_pitch_cd);
+                // plane.nav_pitch_cd = plane.nav_pitch_cd*10;
+                // SRV_Channels::set_output_scaled(SRV_Channel::k_elevator, plane.nav_pitch_cd);
+                // break;
+            }
+                // break;
+            case QuadPlane::AUTO_STATE::CRUISE: {
+                // gcs().send_text(MAV_SEVERITY_INFO, "pitch demand %.1f", (double)plane.nav_pitch_cd);
+                // plane.nav_pitch_cd = plane.nav_pitch_cd*10;
+                // introduce integrator
+                // SRV_Channels::set_output_scaled(SRV_Channel::k_elevator, plane.nav_pitch_cd);
+                quadplane.autostate.use_elev = true;
+                break;
+            }
+            case QuadPlane::AUTO_STATE::DESCENT: {
+                quadplane.autostate.use_elev = false;
+                break;
+            }
+            default:
+            break;
+        }
+
+        if(quadplane.autostate.use_elev){
+            // gcs().send_text(MAV_SEVERITY_INFO, "nav pitch %.1f", (double)plane.nav_pitch_cd);
+            plane.nav_pitch_cd = plane.nav_pitch_cd*10;
+            SRV_Channels::set_output_scaled(SRV_Channel::k_elevator, plane.nav_pitch_cd);
+        }
+        
+
         if (quadplane.option_is_set(QuadPlane::OPTION::LEVEL_TRANSITION) && !quadplane.tiltrotor.enabled()) {
             climb_rate_cms = MIN(climb_rate_cms, 0.0f);
         }
@@ -1676,6 +1789,7 @@ void SLT_Transition::update()
         break;
     }
         
+       
     case TRANSITION_TIMER: {
         quadplane.set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
         // after airspeed is reached we degrade throttle over the
@@ -1735,14 +1849,8 @@ void SLT_Transition::update()
         in_forced_transition = false;
         return;
     }
-
-    quadplane.set_climb_rate_cms(0);
-    // quadplane.set_target_alt_cms(50*100);
-    quadplane.run_z_controller();
-
-    // gcs().send_text(MAV_SEVERITY_INFO, "Controlling Z");
     
-    quadplane.motors_output();
+    quadplane.motors_output(true);
 
     set_last_fw_pitch();
 }

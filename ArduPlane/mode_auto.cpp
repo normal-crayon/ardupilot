@@ -74,7 +74,12 @@ void ModeAuto::update()
 
 #if HAL_QUADPLANE_ENABLED
     if (plane.quadplane.in_vtol_auto()) {
+
+        // gcs().send_text(MAV_SEVERITY_INFO, "quadplane stablize");
         plane.quadplane.control_auto();
+        // plane.calc_throttle();
+        // plane.calc_nav_pitch();
+        // plane.calc_nav_roll();
         return;
     }
 #endif

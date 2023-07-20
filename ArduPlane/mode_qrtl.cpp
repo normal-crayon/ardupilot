@@ -15,6 +15,11 @@ bool ModeQRTL::_enter()
     plane.prev_WP_loc = plane.current_loc;
 
     int32_t RTL_alt_abs_cm = plane.home.alt + quadplane.qrtl_alt*100UL;
+    gcs().send_text(MAV_SEVERITY_INFO, "alt abs %.1f, qtrl alt %.1f, home alt %.1f", 
+                                    (double)RTL_alt_abs_cm,
+                                    (double)quadplane.qrtl_alt*100UL, 
+                                    (double) plane.home.alt);
+
     if (quadplane.motors->get_desired_spool_state() == AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED) {
         // VTOL motors are active, either in VTOL flight or assisted flight
         Location destination = plane.calc_best_rally_or_home_location(plane.current_loc, RTL_alt_abs_cm);
